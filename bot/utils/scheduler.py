@@ -9,6 +9,8 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from typing import List, Dict, Optional
 
+from pyrogram.enums import ParseMode
+
 from bot.config import Config
 from bot.scrapers.franime import FranimeScraper
 from bot.scrapers.tmdb import TMDBClient
@@ -127,13 +129,13 @@ async def check_posters(client, tmdb: TMDBClient):
                         Config.CHANNEL_ID,
                         photo=poster,
                         caption=caption,
-                        parse_mode="html"
+                        parse_mode=ParseMode.HTML
                     )
                 else:
                     await client.send_message(
                         Config.CHANNEL_ID,
                         caption,
-                        parse_mode="html"
+                        parse_mode=ParseMode.HTML
                     )
                 item["published_poster"] = True
                 updated = True
@@ -198,7 +200,7 @@ async def check_releases(client, franime: FranimeScraper):
                 status_msg = await client.send_message(
                     Config.CHANNEL_ID,
                     f"⬇️ Téléchargement de <b>{titre}</b> S{saison}E{episode}...",
-                    parse_mode="html"
+                    parse_mode=ParseMode.HTML
                 )
 
                 await download_file(direct_url, hd_path)
@@ -208,7 +210,7 @@ async def check_releases(client, franime: FranimeScraper):
                     Config.CHANNEL_ID,
                     status_msg.id,
                     f"🔄 Conversion 480p de <b>{titre}</b> S{saison}E{episode}...",
-                    parse_mode="html"
+                    parse_mode=ParseMode.HTML
                 )
                 await convert_to_480p(hd_path, low_path)
 
@@ -217,13 +219,13 @@ async def check_releases(client, franime: FranimeScraper):
                     Config.CHANNEL_ID,
                     status_msg.id,
                     f"📤 Upload 480p de <b>{titre}</b> S{saison}E{episode}...",
-                    parse_mode="html"
+                    parse_mode=ParseMode.HTML
                 )
                 await client.send_video(
                     Config.CHANNEL_ID,
                     video=low_path,
                     caption=f"🎬 {titre} — S{saison}E{episode} [{lang.upper()}] (480p)",
-                    parse_mode="html",
+                    parse_mode=ParseMode.HTML,
                     supports_streaming=True
                 )
 
@@ -232,13 +234,13 @@ async def check_releases(client, franime: FranimeScraper):
                     Config.CHANNEL_ID,
                     status_msg.id,
                     f"📤 Upload HD de <b>{titre}</b> S{saison}E{episode}...",
-                    parse_mode="html"
+                    parse_mode=ParseMode.HTML
                 )
                 await client.send_video(
                     Config.CHANNEL_ID,
                     video=hd_path,
                     caption=f"🎬 {titre} — S{saison}E{episode} [{lang.upper()}] (HD)",
-                    parse_mode="html",
+                    parse_mode=ParseMode.HTML,
                     supports_streaming=True
                 )
 

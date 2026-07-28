@@ -4,6 +4,7 @@ Commandes du bot (owner only).
 from functools import wraps
 
 from pyrogram import Client, filters
+from pyrogram.enums import ParseMode
 from pyrogram.types import Message
 
 from bot.config import Config
@@ -35,7 +36,7 @@ async def start_cmd(client: Client, message: Message):
         "• /anime &lt;nom&gt; — Rechercher un anime\n"
         "• /planning — Planning du jour\n"
         "• /status — État de la file auto",
-        parse_mode="html"
+        parse_mode=ParseMode.HTML
     )
 
 
@@ -48,7 +49,7 @@ async def anime_cmd(client: Client, message: Message):
         return
 
     q = query[1].strip()
-    await message.reply(f"🔍 Recherche de <b>{q}</b>...", parse_mode="html")
+    await message.reply(f"🔍 Recherche de <b>{q}</b>...", parse_mode=ParseMode.HTML)
 
     results = franime.search_anime(q, limit=5)
     if not results:
@@ -57,7 +58,7 @@ async def anime_cmd(client: Client, message: Message):
 
     text = f"🔍 <b>{len(results)} résultat(s)</b> pour « {q} »\nChoisis un anime :"
     keyboard = search_results_keyboard(results)
-    await message.reply(text, reply_markup=keyboard, parse_mode="html")
+    await message.reply(text, reply_markup=keyboard, parse_mode=ParseMode.HTML)
 
 
 @Client.on_message(filters.command("planning") & filters.private)
@@ -84,7 +85,7 @@ async def planning_cmd(client: Client, message: Message):
             f"{r.get('heure', '?')} — "
             f"[{r.get('lang', 'vostfr').upper()}]"
         )
-    await message.reply("\n".join(lines), parse_mode="html")
+    await message.reply("\n".join(lines), parse_mode=ParseMode.HTML)
 
 
 @Client.on_message(filters.command("status") & filters.private)
@@ -103,4 +104,4 @@ async def status_cmd(client: Client, message: Message):
             f"{status} <b>{item['titre']}</b> S{item['saison']}E{item.get('episode', '?')} "
             f"à {item['heure']} [{item['lang'].upper()}]"
         )
-    await message.reply("\n".join(lines), parse_mode="html")
+    await message.reply("\n".join(lines), parse_mode=ParseMode.HTML)

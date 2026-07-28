@@ -4,6 +4,7 @@ Callbacks InlineKeyboard — Flux complet /anime.
 import os
 
 from pyrogram import Client, filters
+from pyrogram.enums import ParseMode
 from pyrogram.types import CallbackQuery
 
 from bot.config import Config
@@ -37,9 +38,9 @@ async def on_search_result(client: Client, query: CallbackQuery):
 
     keyboard = seasons_keyboard(info.get("saisons_disponibles", []), slug, anime_id)
     if poster:
-        await query.message.reply_photo(photo=poster, caption=text, reply_markup=keyboard, parse_mode="html")
+        await query.message.reply_photo(photo=poster, caption=text, reply_markup=keyboard, parse_mode=ParseMode.HTML)
     else:
-        await query.message.reply(text, reply_markup=keyboard, parse_mode="html")
+        await query.message.reply(text, reply_markup=keyboard, parse_mode=ParseMode.HTML)
     await query.message.delete()
 
 
@@ -53,7 +54,7 @@ async def on_season_selected(client: Client, query: CallbackQuery):
 
     text = f"🎬 <b>{info.get('titre')}</b> — Saison {season}\nChoisis la langue :"
     keyboard = languages_keyboard(langs, slug, anime_id, season)
-    await query.edit_message_text(text, reply_markup=keyboard, parse_mode="html")
+    await query.edit_message_text(text, reply_markup=keyboard, parse_mode=ParseMode.HTML)
 
 
 @Client.on_callback_query(filters.regex(r"^lang\|"))
@@ -66,7 +67,7 @@ async def on_lang_selected(client: Client, query: CallbackQuery):
 
     text = f"📺 <b>{info.get('titre')}</b> — Saison {season} [{lang.upper()}]\nChoisis un épisode :"
     keyboard = episodes_keyboard(eps, slug, anime_id, season, lang)
-    await query.edit_message_text(text, reply_markup=keyboard, parse_mode="html")
+    await query.edit_message_text(text, reply_markup=keyboard, parse_mode=ParseMode.HTML)
 
 
 @Client.on_callback_query(filters.regex(r"^ep\|"))
@@ -76,7 +77,7 @@ async def on_episode_selected(client: Client, query: CallbackQuery):
 
     text = f"🎬 <b>{slug.replace('-', ' ').title()}</b> — S{season}E{ep_num} [{lang.upper()}]\nQue veux-tu faire ?"
     keyboard = episode_actions_keyboard(slug, anime_id, season, lang, ep_num)
-    await query.edit_message_text(text, reply_markup=keyboard, parse_mode="html")
+    await query.edit_message_text(text, reply_markup=keyboard, parse_mode=ParseMode.HTML)
 
 
 @Client.on_callback_query(filters.regex(r"^dl\|"))
@@ -86,7 +87,7 @@ async def on_download(client: Client, query: CallbackQuery):
 
     status_msg = await query.message.reply(
         f"⬇️ Résolution des liens pour <b>{slug}</b> S{season}E{ep_num}...",
-        parse_mode="html"
+        parse_mode=ParseMode.HTML
     )
 
     try:
@@ -106,27 +107,27 @@ async def on_download(client: Client, query: CallbackQuery):
         low_path = os.path.join(Config.DOWNLOAD_DIR, f"{slug}_s{season}e{ep_num}_480p.mp4")
         os.makedirs(Config.DOWNLOAD_DIR, exist_ok=True)
 
-        await status_msg.edit_text("⬇️ Téléchargement...", parse_mode="html")
+        await status_msg.edit_text("⬇️ Téléchargement...", parse_mode=ParseMode.HTML)
         await download_file(direct_url, hd_path)
 
-        await status_msg.edit_text("🔄 Conversion 480p...", parse_mode="html")
+        await status_msg.edit_text("🔄 Conversion 480p...", parse_mode=ParseMode.HTML)
         await convert_to_480p(hd_path, low_path)
 
-        await status_msg.edit_text("📤 Upload 480p...", parse_mode="html")
+        await status_msg.edit_text("📤 Upload 480p...", parse_mode=ParseMode.HTML)
         await client.send_video(
             query.message.chat.id,
             video=low_path,
             caption=f"🎬 {slug.replace('-', ' ').title()} — S{season}E{ep_num} [{lang.upper()}] (480p)",
-            parse_mode="html",
+            parse_mode=ParseMode.HTML,
             supports_streaming=True,
         )
 
-        await status_msg.edit_text("📤 Upload HD...", parse_mode="html")
+        await status_msg.edit_text("📤 Upload HD...", parse_mode=ParseMode.HTML)
         await client.send_video(
             query.message.chat.id,
             video=hd_path,
             caption=f"🎬 {slug.replace('-', ' ').title()} — S{season}E{ep_num} [{lang.upper()}] (HD)",
-            parse_mode="html",
+            parse_mode=ParseMode.HTML,
             supports_streaming=True,
         )
 
@@ -150,4 +151,4 @@ async def on_streaming(client: Client, query: CallbackQuery):
     lines = [f"📡 <b>Liens streaming</b> — {slug.replace('-', ' ').title()} S{season}E{ep_num}\n"]
     for link in links:
         lines.append(f"• <a href='{link['url']}'>{link['host'].upper()}</a>")
-    await query.message.reply("\n".join(lines), parse_mode="html", disable_web_page_preview=True)
+    await query.message.reply("\n".join(lines), parse_mode=ParseMode.HTML, disable_web_page_preview=True)

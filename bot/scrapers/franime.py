@@ -12,6 +12,7 @@ from typing import List, Dict, Optional
 from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 
 import requests
+import cloudscraper
 from bs4 import BeautifulSoup, Tag
 from rapidfuzz import fuzz
 
@@ -29,7 +30,9 @@ HEADERS = {
 
 class FranimeScraper:
     def __init__(self):
-        self.session = requests.Session()
+        self.session = cloudscraper.create_scraper(
+            browser={"browser": "chrome", "platform": "windows", "mobile": False}
+        )
         self.session.headers.update(HEADERS)
         self.base = Config.FRANIME_BASE
 
@@ -610,4 +613,3 @@ class FranimeScraper:
                 pass
 
         return None
-

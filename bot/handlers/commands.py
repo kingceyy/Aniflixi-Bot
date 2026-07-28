@@ -3,8 +3,8 @@ Commandes du bot (owner only).
 """
 from functools import wraps
 
-from kurigram import Client, filters
-from kurigram.types import Message
+from pyrogram import Client, filters
+from pyrogram.types import Message
 
 from bot.config import Config
 from bot.scrapers.franime import FranimeScraper

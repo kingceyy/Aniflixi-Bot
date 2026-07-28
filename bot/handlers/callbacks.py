@@ -3,8 +3,8 @@ Callbacks InlineKeyboard — Flux complet /anime.
 """
 import os
 
-from kurigram import Client, filters
-from kurigram.types import CallbackQuery
+from pyrogram import Client, filters
+from pyrogram.types import CallbackQuery
 
 from bot.config import Config
 from bot.scrapers.franime import FranimeScraper

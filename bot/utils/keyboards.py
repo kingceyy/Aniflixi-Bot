@@ -1,7 +1,7 @@
 """
 Claviers inline pour le bot.
 """
-from kurigram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from typing import List, Dict
 
 

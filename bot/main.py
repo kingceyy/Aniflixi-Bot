@@ -1,5 +1,5 @@
 """
-Anime Bot — Kurigram + FRAnime + TMDB + APScheduler
+Anime Bot — pyrogram + FRAnime + TMDB + APScheduler
 """
 import asyncio
 import os
@@ -8,7 +8,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
-from kurigram import Client, idle
+from pyrogram import Client, idle
 
 from bot.config import Config
 from bot.scrapers.franime import FranimeScraper

@@ -8,6 +8,7 @@ Scraper FRAnime (franime.fr)
 import re
 import time
 import json
+import logging
 from typing import List, Dict, Optional
 from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 
@@ -17,6 +18,8 @@ from bs4 import BeautifulSoup, Tag
 from rapidfuzz import fuzz
 
 from bot.config import Config
+
+logger = logging.getLogger(__name__)
 
 HEADERS = {
     "Accept-Language": "fr-FR,fr;q=0.9,en;q=0.8",
@@ -66,24 +69,32 @@ class FranimeScraper:
                 out.append(txt)
         return out
 
-    def _fetch(self, url: str) -> str:
+    def _fetch(self, url: str, js_render: bool = False) -> str:
         if Config.ZENROWS_API_KEY:
             try:
+                params = {
+                    "url": url,
+                    "apikey": Config.ZENROWS_API_KEY,
+                    "premium_proxy": "true",
+                }
+                if js_render:
+                    # Certaines pages FRAnime (ex: /recherche) sont en full CSR :
+                    # le HTML brut ne contient que des placeholders de chargement,
+                    # les résultats sont injectés par le JS après coup. Il faut
+                    # que ZenRows exécute ce JS et attende le rendu final.
+                    params["js_render"] = "true"
+                    params["wait"] = "3000"
                 resp = requests.get(
                     "https://api.zenrows.com/v1/",
-                    params={
-                        "url": url,
-                        "apikey": Config.ZENROWS_API_KEY,
-                        "premium_proxy": "true",
-                    },
-                    timeout=30,
+                    params=params,
+                    timeout=45 if js_render else 30,
                 )
                 resp.raise_for_status()
                 return resp.text
-            except requests.exceptions.RequestException:
+            except requests.exceptions.RequestException as e:
                 # Bascule sur cloudscraper en direct si ZenRows échoue
                 # (quota dépassé, timeout, panne du service, etc.)
-                pass
+                logger.warning("ZenRows fetch failed for %s (js_render=%s): %s", url, js_render, e)
 
         resp = self.session.get(url, timeout=20)
         resp.raise_for_status()
@@ -271,8 +282,8 @@ class FranimeScraper:
                         "poster": item.get("poster") or item.get("image"),
                         "url": f"{self.base}/anime/{item.get('slug')}",
                     })
-        except Exception:
-            pass
+        except Exception as e:
+            logger.info("API interne /api/animes/search indisponible pour %r: %s", query, e)
 
         # Fallback scraping
         if not results:
@@ -288,7 +299,10 @@ class FranimeScraper:
                     "algorithme": "Normal",
                     "page": "0",
                 }
-                html = self._fetch(f"{search_url}?{urlencode(params)}")
+                # /recherche est rendue côté client (React) : le HTML brut ne
+                # contient que des placeholders "Chargement...". Il faut forcer
+                # ZenRows à exécuter le JS pour récupérer les vraies cartes.
+                html = self._fetch(f"{search_url}?{urlencode(params)}", js_render=True)
                 soup = BeautifulSoup(html, "html.parser")
                 # Chercher les liens vers /anime/
                 seen = set()
@@ -312,8 +326,14 @@ class FranimeScraper:
                         "poster": poster,
                         "url": f"{self.base}/anime/{slug}",
                     })
-            except Exception:
-                pass
+                if not results:
+                    logger.warning(
+                        "Recherche %r : 0 lien /anime/ trouvé dans le HTML rendu de /recherche "
+                        "(le JS a peut-être mis plus de temps que les 3s d'attente, ou la "
+                        "structure du DOM a changé).", query
+                    )
+            except Exception as e:
+                logger.warning("Échec du scraping /recherche pour %r: %s", query, e)
 
         # Scoring rapidfuzz
         scored = []

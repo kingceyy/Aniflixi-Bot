@@ -64,6 +64,24 @@ class FranimeScraper:
         return out
 
     def _fetch(self, url: str) -> str:
+        if Config.ZENROWS_API_KEY:
+            try:
+                resp = requests.get(
+                    "https://api.zenrows.com/v1/",
+                    params={
+                        "url": url,
+                        "apikey": Config.ZENROWS_API_KEY,
+                        "premium_proxy": "true",
+                    },
+                    timeout=30,
+                )
+                resp.raise_for_status()
+                return resp.text
+            except requests.exceptions.RequestException:
+                # Bascule sur cloudscraper en direct si ZenRows échoue
+                # (quota dépassé, timeout, panne du service, etc.)
+                pass
+
         resp = self.session.get(url, timeout=20)
         resp.raise_for_status()
         return resp.text

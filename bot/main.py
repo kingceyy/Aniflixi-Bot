@@ -16,10 +16,6 @@ from bot.scrapers.franime import FranimeScraper
 from bot.scrapers.tmdb import TMDBClient
 from bot.utils.scheduler import scan_calendar, check_posters, check_releases
 
-# Import handlers pour les enregistrer
-import bot.handlers.commands
-import bot.handlers.callbacks
-
 franime = FranimeScraper()
 tmdb = TMDBClient()
 
@@ -29,6 +25,7 @@ app = Client(
     api_hash=Config.API_HASH,
     bot_token=Config.BOT_TOKEN,
     workers=4,
+    plugins=dict(root="bot/handlers"),
 )
 
 

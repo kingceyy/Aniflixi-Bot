@@ -30,10 +30,8 @@ async def on_search_result(client: Client, query: CallbackQuery):
     poster = await tmdb.get_poster_url(info.get("titre", ""))
 
     text = (
-        f"🎬 <b>{info.get('titre', 'Inconnu')}</b>
-"
-        f"📊 {info.get('nb_saisons', '?')} saison(s) — {info.get('nb_episodes', '?')} épisode(s)
-"
+        f"🎬 <b>{info.get('titre', 'Inconnu')}</b>\n"
+        f"📊 {info.get('nb_saisons', '?')} saison(s) — {info.get('nb_episodes', '?')} épisode(s)\n"
         f"📝 {info.get('synopsis', 'Pas de synopsis.')[:300]}..."
     )
 
@@ -53,8 +51,7 @@ async def on_season_selected(client: Client, query: CallbackQuery):
     info = franime.get_anime_info(f"https://franime.fr/anime/{slug}?s={season}&anime_id={anime_id}")
     langs = info.get("langues_disponibles", ["VOSTFR"])
 
-    text = f"🎬 <b>{info.get('titre')}</b> — Saison {season}
-Choisis la langue :"
+    text = f"🎬 <b>{info.get('titre')}</b> — Saison {season}\nChoisis la langue :"
     keyboard = languages_keyboard(langs, slug, anime_id, season)
     await query.edit_message_text(text, reply_markup=keyboard, parse_mode="html")
 
@@ -67,8 +64,7 @@ async def on_lang_selected(client: Client, query: CallbackQuery):
     info = franime.get_anime_info(f"https://franime.fr/anime/{slug}?s={season}&lang={lang}&anime_id={anime_id}")
     eps = info.get("episodes_par_saison", {}).get(f"Saison {season}", [])
 
-    text = f"📺 <b>{info.get('titre')}</b> — Saison {season} [{lang.upper()}]
-Choisis un épisode :"
+    text = f"📺 <b>{info.get('titre')}</b> — Saison {season} [{lang.upper()}]\nChoisis un épisode :"
     keyboard = episodes_keyboard(eps, slug, anime_id, season, lang)
     await query.edit_message_text(text, reply_markup=keyboard, parse_mode="html")
 
@@ -78,8 +74,7 @@ async def on_episode_selected(client: Client, query: CallbackQuery):
     _, slug, anime_id, season, lang, ep_num = query.data.split("|", 5)
     await query.answer(f"Épisode {ep_num}")
 
-    text = f"🎬 <b>{slug.replace('-', ' ').title()}</b> — S{season}E{ep_num} [{lang.upper()}]
-Que veux-tu faire ?"
+    text = f"🎬 <b>{slug.replace('-', ' ').title()}</b> — S{season}E{ep_num} [{lang.upper()}]\nQue veux-tu faire ?"
     keyboard = episode_actions_keyboard(slug, anime_id, season, lang, ep_num)
     await query.edit_message_text(text, reply_markup=keyboard, parse_mode="html")
 
@@ -152,9 +147,7 @@ async def on_streaming(client: Client, query: CallbackQuery):
         await query.message.reply("❌ Aucun lien de streaming trouvé.")
         return
 
-    lines = [f"📡 <b>Liens streaming</b> — {slug.replace('-', ' ').title()} S{season}E{ep_num}
-"]
+    lines = [f"📡 <b>Liens streaming</b> — {slug.replace('-', ' ').title()} S{season}E{ep_num}\n"]
     for link in links:
         lines.append(f"• <a href='{link['url']}'>{link['host'].upper()}</a>")
-    await query.message.reply("
-".join(lines), parse_mode="html", disable_web_page_preview=True)
+    await query.message.reply("\n".join(lines), parse_mode="html", disable_web_page_preview=True)

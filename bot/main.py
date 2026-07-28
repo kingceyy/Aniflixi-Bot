@@ -1,5 +1,5 @@
 """
-Anime Bot — pyrogram + FRAnime + TMDB + APScheduler
+Anime Bot — Kurigram + FRAnime + TMDB + APScheduler
 """
 import asyncio
 import os

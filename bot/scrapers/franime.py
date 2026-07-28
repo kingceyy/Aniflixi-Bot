@@ -486,14 +486,14 @@ class FranimeScraper:
             text = script.string or ""
             # Patterns classiques
             for pattern in [
-                r'https?://[^\s"'<>]+\.mp4',
-                r'https?://[^\s"'<>]+\.m3u8',
-                r'https?://[^\s"'<>]+sibnet\.ru[^\s"'<>]*',
-                r'https?://[^\s"'<>]+vidmoly\.[a-z]+[^\s"'<>]*',
-                r'https?://[^\s"'<>]+sendvid\.com[^\s"'<>]*',
-                r'https?://[^\s"'<>]+doodstream\.[^\s"'<>]*',
-                r'https?://[^\s"'<>]+voe\.sx[^\s"'<>]*',
-                r'https?://[^\s"'<>]+streamtape\.[^\s"'<>]*',
+                r'https?://[^\s"\'<>]+\.mp4',
+                r'https?://[^\s"\'<>]+\.m3u8',
+                r'https?://[^\s"\'<>]+sibnet\.ru[^\s"\'<>]*',
+                r'https?://[^\s"\'<>]+vidmoly\.[a-z]+[^\s"\'<>]*',
+                r'https?://[^\s"\'<>]+sendvid\.com[^\s"\'<>]*',
+                r'https?://[^\s"\'<>]+doodstream\.[^\s"\'<>]*',
+                r'https?://[^\s"\'<>]+voe\.sx[^\s"\'<>]*',
+                r'https?://[^\s"\'<>]+streamtape\.[^\s"\'<>]*',
             ]:
                 for match in re.findall(pattern, text):
                     if match not in seen:
@@ -571,7 +571,7 @@ class FranimeScraper:
                 # Chercher dans le JS
                 for script in soup.find_all("script"):
                     text = script.string or ""
-                    m = re.search(r'["'](https?://[^"']+\.mp4)["']', text)
+                    m = re.search(r'["\'](https?://[^"\']+\.mp4)["\']', text)
                     if m:
                         return m.group(1)
             except Exception:
@@ -584,10 +584,10 @@ class FranimeScraper:
                 soup = BeautifulSoup(html, "html.parser")
                 for script in soup.find_all("script"):
                     text = script.string or ""
-                    m = re.search(r'["'](https?://[^"']+\.mp4)["']', text)
+                    m = re.search(r'["\'](https?://[^"\']+\.mp4)["\']', text)
                     if m:
                         return m.group(1)
-                    m = re.search(r'["'](https?://[^"']+\.m3u8)["']', text)
+                    m = re.search(r'["\'](https?://[^"\']+\.m3u8)["\']', text)
                     if m:
                         return m.group(1)
             except Exception:
@@ -610,3 +610,4 @@ class FranimeScraper:
                 pass
 
         return None
+

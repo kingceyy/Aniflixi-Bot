@@ -19,10 +19,6 @@ from rapidfuzz import fuzz
 from bot.config import Config
 
 HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-    ),
     "Accept-Language": "fr-FR,fr;q=0.9,en;q=0.8",
     "Referer": "https://franime.fr/",
 }
@@ -33,6 +29,9 @@ class FranimeScraper:
         self.session = cloudscraper.create_scraper(
             browser={"browser": "chrome", "platform": "windows", "mobile": False}
         )
+        # On n'écrase PAS le User-Agent : cloudscraper le calibre précisément
+        # sur l'empreinte TLS (JA3) qu'il simule pour le navigateur choisi ci-dessus.
+        # Le remplacer casserait cette cohérence et re-déclencherait le blocage anti-bot.
         self.session.headers.update(HEADERS)
         self.base = Config.FRANIME_BASE
 

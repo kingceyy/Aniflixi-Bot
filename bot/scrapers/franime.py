@@ -34,6 +34,9 @@ class FranimeScraper:
         # Le remplacer casserait cette cohérence et re-déclencherait le blocage anti-bot.
         self.session.headers.update(HEADERS)
         self.base = Config.FRANIME_BASE
+        self._calendar_cache: Optional[Dict[str, List[Dict]]] = None
+        self._calendar_cache_ts: float = 0
+        self._calendar_cache_ttl: int = 900  # 15 min : évite de re-solliciter ZenRows à chaque clic de pagination
 
     # ────────────────────────────────
     # Helpers parsing
@@ -89,11 +92,19 @@ class FranimeScraper:
     # ────────────────────────────────
     # 1. Calendrier hebdomadaire
     # ────────────────────────────────
-    def get_calendar(self) -> Dict[str, List[Dict]]:
+    def get_calendar(self, force_refresh: bool = False) -> Dict[str, List[Dict]]:
         """
         Scrape franime.fr/calendrier
         Retourne: {"lundi": [{titre, heure, episode, lang, slug, anime_id, poster}], ...}
         """
+        now = time.time()
+        if (
+            not force_refresh
+            and self._calendar_cache is not None
+            and (now - self._calendar_cache_ts) < self._calendar_cache_ttl
+        ):
+            return self._calendar_cache
+
         html = self._fetch(f"{self.base}/calendrier")
         soup = BeautifulSoup(html, "html.parser")
 
@@ -152,12 +163,21 @@ class FranimeScraper:
         if all(len(v) == 0 for v in planning.values()):
             planning = self._get_calendar_fallback(soup)
 
+        self._calendar_cache = planning
+        self._calendar_cache_ts = time.time()
         return planning
 
     def _parse_calendar_card(self, elem: Tag, href: str) -> Optional[Dict]:
         """Extrait les infos d'une card du calendrier à partir de l'élément <a>."""
         # Cherche l'heure dans les descendants (ex: "17h20", "17:20", "01h44")
-        texts = [t.get_text(strip=True) for t in elem.find_all(True)]
+        # On ne garde que les éléments "feuilles" (sans enfant-balise) pour éviter
+        # que .get_text() sur un conteneur parent ne concatène plusieurs infos
+        # sans séparateur (ex: "E11" + "06h03" + "Titre" -> "E1106h03Titre").
+        texts = [
+            t.get_text(strip=True)
+            for t in elem.find_all(True)
+            if not t.find_all(True) and t.get_text(strip=True)
+        ]
         heure = None
         for t in texts:
             m = re.match(r"^(\d{1,2})[h:](\d{2})$", t)
@@ -239,19 +259,18 @@ class FranimeScraper:
         results = []
         # Tentative API interne (si elle existe)
         try:
-            api_url = f"{self.base}/api/animes/search"
-            resp = self.session.get(api_url, params={"q": query}, timeout=10)
-            if resp.status_code == 200:
-                data = resp.json()
-                if isinstance(data, list):
-                    for item in data[:limit]:
-                        results.append({
-                            "title": item.get("title") or item.get("name"),
-                            "slug": item.get("slug"),
-                            "anime_id": str(item.get("id", "")),
-                            "poster": item.get("poster") or item.get("image"),
-                            "url": f"{self.base}/anime/{item.get('slug')}",
-                        })
+            api_url = f"{self.base}/api/animes/search?q={requests.utils.quote(query)}"
+            raw = self._fetch(api_url)
+            data = json.loads(raw)
+            if isinstance(data, list):
+                for item in data[:limit]:
+                    results.append({
+                        "title": item.get("title") or item.get("name"),
+                        "slug": item.get("slug"),
+                        "anime_id": str(item.get("id", "")),
+                        "poster": item.get("poster") or item.get("image"),
+                        "url": f"{self.base}/anime/{item.get('slug')}",
+                    })
         except Exception:
             pass
 

@@ -11,6 +11,7 @@ from bot.config import Config
 from bot.scrapers.franime import FranimeScraper
 from bot.scrapers.tmdb import TMDBClient
 from bot.utils.keyboards import search_results_keyboard
+from bot.utils.planning import render_planning_day
 from bot.utils.scheduler import load_queue
 
 franime = FranimeScraper()
@@ -71,21 +72,9 @@ async def planning_cmd(client: Client, message: Message):
         "thursday": "jeudi", "friday": "vendredi", "saturday": "samedi", "sunday": "dimanche"
     }
     today_key = day_map.get(today, today)
-    releases = planning.get(today_key, [])
 
-    if not releases:
-        await message.reply(f"📅 Aucune sortie prévue aujourd'hui ({today_key}).")
-        return
-
-    lines = [f"📅 <b>Planning du jour</b> — {today_key.upper()}\n"]
-    for r in releases:
-        lines.append(
-            f"• <b>{r.get('titre', 'Inconnu')}</b> — "
-            f"Ep {r.get('episode', '?')} — "
-            f"{r.get('heure', '?')} — "
-            f"[{r.get('lang', 'vostfr').upper()}]"
-        )
-    await message.reply("\n".join(lines), parse_mode=ParseMode.HTML)
+    text, keyboard = render_planning_day(planning, today_key)
+    await message.reply(text, reply_markup=keyboard, parse_mode=ParseMode.HTML)
 
 
 @Client.on_message(filters.command("status") & filters.private)

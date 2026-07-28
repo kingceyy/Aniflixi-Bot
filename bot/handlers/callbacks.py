@@ -16,10 +16,21 @@ from bot.utils.keyboards import (
     episodes_keyboard,
     episode_actions_keyboard,
 )
+from bot.utils.planning import render_planning_day
 from bot.utils.downloader import download_file, convert_to_480p, cleanup_files
 
 franime = FranimeScraper()
 tmdb = TMDBClient()
+
+
+@Client.on_callback_query(filters.regex(r"^planning\|"))
+async def on_planning_navigate(client: Client, query: CallbackQuery):
+    _, day_key = query.data.split("|", 1)
+    await query.answer()
+
+    planning = franime.get_calendar()  # utilise le cache 15 min, pas de nouvel appel ZenRows
+    text, keyboard = render_planning_day(planning, day_key)
+    await query.message.edit_text(text, reply_markup=keyboard, parse_mode=ParseMode.HTML)
 
 
 @Client.on_callback_query(filters.regex(r"^search\|"))

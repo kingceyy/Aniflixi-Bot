@@ -1,0 +1,10 @@
+kurigram
+requests
+beautifulsoup4
+aiohttp
+aiofiles
+rapidfuzz
+python-dotenv
+apscheduler
+cloudscraper
+lxml

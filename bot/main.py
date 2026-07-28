@@ -24,12 +24,20 @@ tmdb = TMDBClient()
 
 app = Client(
     "anime_bot",
+    api_id=Config.API_ID,
+    api_hash=Config.API_HASH,
     bot_token=Config.BOT_TOKEN,
     workers=4,
 )
 
 
 async def main():
+    if not Config.API_ID or not Config.API_HASH:
+        raise RuntimeError(
+            "API_ID et API_HASH sont requis. Récupère-les sur https://my.telegram.org "
+            "et définis-les comme variables d'environnement sur Koyeb."
+        )
+
     os.makedirs(Config.DATA_DIR, exist_ok=True)
     os.makedirs(Config.CACHE_DIR, exist_ok=True)
     os.makedirs(Config.DOWNLOAD_DIR, exist_ok=True)

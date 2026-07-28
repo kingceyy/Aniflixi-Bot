@@ -277,8 +277,18 @@ class FranimeScraper:
         # Fallback scraping
         if not results:
             try:
-                search_url = f"{self.base}/search"
-                html = self._fetch(f"{search_url}?q={requests.utils.quote(query)}")
+                search_url = f"{self.base}/recherche"
+                params = {
+                    "search": query,
+                    "type": "TOUT",
+                    "format": "TOUT",
+                    "status": "TOUT",
+                    "ordre": "Ressemblance",
+                    "themes": "TOUT",
+                    "algorithme": "Normal",
+                    "page": "0",
+                }
+                html = self._fetch(f"{search_url}?{urlencode(params)}")
                 soup = BeautifulSoup(html, "html.parser")
                 # Chercher les liens vers /anime/
                 seen = set()

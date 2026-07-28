@@ -4,6 +4,7 @@ Anime Bot — Kurigram + FRAnime + TMDB + APScheduler
 import asyncio
 import os
 
+from aiohttp import web
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
@@ -29,6 +30,23 @@ app = Client(
     bot_token=Config.BOT_TOKEN,
     workers=4,
 )
+
+
+async def health(request):
+    return web.Response(text="OK")
+
+
+async def start_health_server():
+    """Serveur HTTP minimal pour les health checks Koyeb (bot Telegram = pas de port par défaut)."""
+    web_app = web.Application()
+    web_app.router.add_get("/health", health)
+    web_app.router.add_get("/", health)
+    runner = web.AppRunner(web_app)
+    await runner.setup()
+    port = int(os.getenv("PORT", "5000"))
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+    print(f"[Bot] Health server démarré sur le port {port}")
 
 
 async def main():
@@ -73,6 +91,8 @@ async def main():
 
     scheduler.start()
     print("[Bot] Scheduler démarré — Europe/Paris")
+
+    await start_health_server()
 
     await app.start()
     print("[Bot] Bot démarré")

@@ -1,6 +1,7 @@
 """
 Commandes du bot (owner only).
 """
+import json
 from functools import wraps
 
 from pyrogram import Client, filters
@@ -8,6 +9,7 @@ from pyrogram.enums import ParseMode
 from pyrogram.types import Message
 
 from bot.config import Config
+from bot.scrapers import catalog
 from bot.scrapers.franime import FranimeScraper
 from bot.scrapers.tmdb import TMDBClient
 from bot.utils.keyboards import search_results_keyboard
@@ -36,7 +38,8 @@ async def start_cmd(client: Client, message: Message):
         "Commandes disponibles :\n"
         "• /anime &lt;nom&gt; — Rechercher un anime\n"
         "• /planning — Planning du jour\n"
-        "• /status — État de la file auto",
+        "• /status — État de la file auto\n"
+        "• /importcatalog — Importer un catalogue (en réponse à un fichier .json)",
         parse_mode=ParseMode.HTML
     )
 
@@ -52,7 +55,15 @@ async def anime_cmd(client: Client, message: Message):
     q = query[1].strip()
     await message.reply(f"🔍 Recherche de <b>{q}</b>...", parse_mode=ParseMode.HTML)
 
-    results = franime.search_anime(q, limit=5)
+    try:
+        results = franime.search_anime(q, limit=5)
+    except Exception as e:
+        await message.reply(
+            f"⚠️ Recherche indisponible : {e}\n\n"
+            f"Envoie un catalogue à jour avec /importcatalog si le problème persiste.",
+        )
+        return
+
     if not results:
         await message.reply("😕 Aucun résultat trouvé.")
         return
@@ -60,6 +71,42 @@ async def anime_cmd(client: Client, message: Message):
     text = f"🔍 <b>{len(results)} résultat(s)</b> pour « {q} »\nChoisis un anime :"
     keyboard = search_results_keyboard(results)
     await message.reply(text, reply_markup=keyboard, parse_mode=ParseMode.HTML)
+
+
+@Client.on_message(filters.command("importcatalog") & filters.private)
+@owner_only
+async def import_catalog_cmd(client: Client, message: Message):
+    """
+    Importe manuellement le catalogue FRAnime depuis un fichier .json envoyé
+    en pièce jointe (réponds à ce fichier avec /importcatalog).
+
+    Utile quand le serveur du bot (IP datacenter) se fait bloquer par
+    Cloudflare sur api.franime.fr : génère le fichier depuis un réseau non
+    bloqué (téléphone, PC perso) avec le script fetch_catalog(force=True),
+    envoie-le au bot sur Telegram, puis réponds-y avec cette commande.
+    """
+    target = message.reply_to_message
+    if not target or not target.document:
+        await message.reply(
+            "❌ Réponds à un fichier <b>.json</b> (le catalogue téléchargé) avec /importcatalog.",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    status = await message.reply("⬇️ Téléchargement et validation du fichier...")
+
+    try:
+        file_path = await target.download()
+        with open(file_path, encoding="utf-8") as f:
+            data = json.load(f)
+        count = catalog.set_catalog(data)
+        await status.edit_text(f"✅ Catalogue importé : <b>{count}</b> animes.", parse_mode=ParseMode.HTML)
+    except json.JSONDecodeError:
+        await status.edit_text("❌ Le fichier n'est pas un JSON valide.")
+    except ValueError as e:
+        await status.edit_text(f"❌ {e}")
+    except Exception as e:
+        await status.edit_text(f"❌ Erreur lors de l'import : {e}")
 
 
 @Client.on_message(filters.command("planning") & filters.private)

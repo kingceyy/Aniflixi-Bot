@@ -1,7 +1,7 @@
 """
 Scraper FRAnime (franime.fr)
 - Calendrier hebdomadaire
-- Recherche d'anime (avec rapidfuzz)
+- Recherche d'anime (catalogue local + rapidfuzz)
 - Fiche anime (saisons, langues, épisodes)
 - Résolution des liens de streaming
 """
@@ -18,6 +18,14 @@ from bs4 import BeautifulSoup, Tag
 from rapidfuzz import fuzz
 
 from bot.config import Config
+from bot.scrapers.catalog import (
+    fetch_catalog,
+    search_catalog,
+    get_anime_by_id,
+    slugify,
+    LANG_CATALOG_TO_LABEL,
+    LANG_LABEL_TO_CATALOG,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -78,10 +86,6 @@ class FranimeScraper:
                     "premium_proxy": "true",
                 }
                 if js_render:
-                    # Certaines pages FRAnime (ex: /recherche) sont en full CSR :
-                    # le HTML brut ne contient que des placeholders de chargement,
-                    # les résultats sont injectés par le JS après coup. Il faut
-                    # que ZenRows exécute ce JS et attende le rendu final.
                     params["js_render"] = "true"
                     params["wait"] = "3000"
                 resp = requests.get(
@@ -92,8 +96,6 @@ class FranimeScraper:
                 resp.raise_for_status()
                 return resp.text
             except requests.exceptions.RequestException as e:
-                # Bascule sur cloudscraper en direct si ZenRows échoue
-                # (quota dépassé, timeout, panne du service, etc.)
                 logger.warning("ZenRows fetch failed for %s (js_render=%s): %s", url, js_render, e)
 
         resp = self.session.get(url, timeout=20)
@@ -119,7 +121,6 @@ class FranimeScraper:
         html = self._fetch(f"{self.base}/calendrier")
         soup = BeautifulSoup(html, "html.parser")
 
-        # Mapping jour français -> clé normalisée
         day_map = {
             "lundi": "lundi", "mardi": "mardi", "mercredi": "mercredi",
             "jeudi": "jeudi", "vendredi": "vendredi", "samedi": "samedi", "dimanche": "dimanche"
@@ -127,35 +128,15 @@ class FranimeScraper:
 
         planning = {d: [] for d in day_map.values()}
 
-        # Le calendrier est probablement structuré avec des sections par jour.
-        # On cherche les éléments qui contiennent le nom du jour en majuscules.
-        # Stratégie : on parcourt tous les éléments et on regroupe les cards
-        # qui suivent un titre de jour.
-
-        # Approche : chercher les containers qui ont un enfant texte avec le jour
-        # ou chercher les balises avec classe contenant le jour.
-        # Comme on ne connait pas les classes exactes, on utilise les ancres de texte.
-
         body = soup.find("body")
         if not body:
             return planning
 
-        # On récupère tous les éléments significatifs (div, section, article, a, img, span)
-        # et on les parcourt pour détecter les jours et les cards.
-        # Simplification : on cherche les textes de jours, puis on regarde les
-        # éléments frères/suivants pour trouver les cards.
-
-        # Méthode alternative : chercher tous les liens qui ressemblent à des liens d'anime
-        # avec un parent qui contient une heure.
-        # On va parser plus finement.
-
-        # Détection des jours via regex sur les textes des éléments
         all_elements = body.find_all(["div", "section", "article", "a", "span", "h2", "h3"])
         current_day = None
 
         for elem in all_elements:
             text = elem.get_text(strip=True).lower()
-            # Détecter le jour (ex: "lundi", "lundi 27/07", "mardi 28/07")
             for day_fr, day_key in day_map.items():
                 if text.startswith(day_fr) and len(text) < 20:
                     current_day = day_key
@@ -163,14 +144,11 @@ class FranimeScraper:
 
             if current_day and elem.name == "a":
                 href = elem.get("href", "")
-                # Vérifier si c'est un lien vers une fiche anime
                 if "/anime/" in href:
                     card = self._parse_calendar_card(elem, href)
                     if card:
                         planning[current_day].append(card)
 
-        # Si la méthode ci-dessus ne trouve rien (structure trop imbriquée),
-        # on tente une approche plus robuste : chercher toutes les cards par pattern.
         if all(len(v) == 0 for v in planning.values()):
             planning = self._get_calendar_fallback(soup)
 
@@ -180,10 +158,6 @@ class FranimeScraper:
 
     def _parse_calendar_card(self, elem: Tag, href: str) -> Optional[Dict]:
         """Extrait les infos d'une card du calendrier à partir de l'élément <a>."""
-        # Cherche l'heure dans les descendants (ex: "17h20", "17:20", "01h44")
-        # On ne garde que les éléments "feuilles" (sans enfant-balise) pour éviter
-        # que .get_text() sur un conteneur parent ne concatène plusieurs infos
-        # sans séparateur (ex: "E11" + "06h03" + "Titre" -> "E1106h03Titre").
         texts = [
             t.get_text(strip=True)
             for t in elem.find_all(True)
@@ -196,15 +170,12 @@ class FranimeScraper:
                 heure = f"{m.group(1).zfill(2)}:{m.group(2)}"
                 break
 
-        # Titre : souvent dans un span ou h3/h4
         titre = None
         for t in texts:
             if len(t) > 3 and not re.match(r"^(\d{1,2})[h:](\d{2})$", t) and t not in ["VF", "VOSTFR", "VA", "VJ"]:
-                # On prend le texte le plus long comme titre
                 if not titre or len(t) > len(titre):
                     titre = t
 
-        # Numéro d'épisode (ex: E5, Ep 5, Episode 5)
         episode = None
         for t in texts:
             m = re.match(r"^[Ee](\d+)$", t)
@@ -216,7 +187,6 @@ class FranimeScraper:
                 episode = int(m.group(1))
                 break
 
-        # Langue (VF/VOSTFR) via drapeau ou texte
         lang = "vostfr"
         all_text = " ".join(texts).lower()
         if "vf" in all_text and "vostfr" not in all_text:
@@ -224,13 +194,11 @@ class FranimeScraper:
         elif "vostfr" in all_text:
             lang = "vostfr"
 
-        # Poster
         poster = None
         img = elem.find("img")
         if img:
             poster = img.get("src") or img.get("data-src")
 
-        # Slug et anime_id
         slug = href.split("/anime/")[-1].split("?")[0].strip("/")
         qs = parse_qs(urlparse(href).query)
         anime_id = (qs.get("anime_id") or [None])[0]
@@ -249,130 +217,73 @@ class FranimeScraper:
         }
 
     def _get_calendar_fallback(self, soup: BeautifulSoup) -> Dict[str, List[Dict]]:
-        """
-        Fallback si les cards ne sont pas des <a> directs.
-        On cherche toutes les images avec un alt ou un parent contenant une heure.
-        """
         planning = {d: [] for d in ["lundi","mardi","mercredi","jeudi","vendredi","samedi","dimanche"]}
-        # Cette méthode est un placeholder ; l'utilisateur pourra ajuster
-        # selon la structure HTML réelle observée.
         return planning
 
     # ────────────────────────────────
-    # 2. Recherche d'anime
+    # 2. Recherche d'anime — catalogue local (plus de scraping /recherche)
     # ────────────────────────────────
     def search_anime(self, query: str, limit: int = 5) -> List[Dict]:
         """
-        Recherche un anime sur FRAnime.
-        Tente d'abord l'API interne, puis fallback sur scraping HTML.
-        Utilise rapidfuzz pour le scoring.
+        Recherche floue sur le catalogue local (mis en cache 24h, voir
+        bot/scrapers/catalog.py). Zéro appel réseau si le cache est chaud.
         """
-        results = []
-        # Tentative API interne (si elle existe)
         try:
-            api_url = f"{self.base}/api/animes/search?q={requests.utils.quote(query)}"
-            raw = self._fetch(api_url)
-            data = json.loads(raw)
-            if isinstance(data, list):
-                for item in data[:limit]:
-                    results.append({
-                        "title": item.get("title") or item.get("name"),
-                        "slug": item.get("slug"),
-                        "anime_id": str(item.get("id", "")),
-                        "poster": item.get("poster") or item.get("image"),
-                        "url": f"{self.base}/anime/{item.get('slug')}",
-                    })
+            raw_results = search_catalog(query, limit=limit)
         except Exception as e:
-            logger.info("API interne /api/animes/search indisponible pour %r: %s", query, e)
+            logger.warning("Échec de la recherche catalogue pour %r: %s", query, e)
+            return []
 
-        # Fallback scraping
-        if not results:
-            try:
-                search_url = f"{self.base}/recherche"
-                params = {
-                    "search": query,
-                    "type": "TOUT",
-                    "format": "TOUT",
-                    "status": "TOUT",
-                    "ordre": "Ressemblance",
-                    "themes": "TOUT",
-                    "algorithme": "Normal",
-                    "page": "0",
-                }
-                # /recherche est rendue côté client (React) : le HTML brut ne
-                # contient que des placeholders "Chargement...". Il faut forcer
-                # ZenRows à exécuter le JS pour récupérer les vraies cartes.
-                html = self._fetch(f"{search_url}?{urlencode(params)}", js_render=True)
-                soup = BeautifulSoup(html, "html.parser")
-                # Chercher les liens vers /anime/
-                seen = set()
-                for a in soup.find_all("a", href=re.compile(r"/anime/")):
-                    href = a.get("href", "")
-                    slug = href.split("/anime/")[-1].split("?")[0].strip("/")
-                    if slug in seen or not slug:
-                        continue
-                    seen.add(slug)
-                    title = a.get_text(strip=True)
-                    if not title:
-                        title = slug.replace("-", " ").title()
-                    img = a.find("img")
-                    poster = img.get("src") or img.get("data-src") if img else None
-                    qs = parse_qs(urlparse(href).query)
-                    anime_id = (qs.get("anime_id") or [None])[0]
-                    results.append({
-                        "title": title,
-                        "slug": slug,
-                        "anime_id": anime_id,
-                        "poster": poster,
-                        "url": f"{self.base}/anime/{slug}",
-                    })
-                if not results:
-                    logger.warning(
-                        "Recherche %r : 0 lien /anime/ trouvé dans le HTML rendu de /recherche "
-                        "(le JS a peut-être mis plus de temps que les 3s d'attente, ou la "
-                        "structure du DOM a changé).", query
-                    )
-            except Exception as e:
-                logger.warning("Échec du scraping /recherche pour %r: %s", query, e)
+        results = []
+        for anime in raw_results:
+            title = anime.get("title") or anime.get("titleO") or ""
+            score = fuzz.token_set_ratio(query.lower(), title.lower())
+            results.append({
+                "title": title,
+                "slug": slugify(title),
+                "anime_id": str(anime.get("id", "")),
+                "poster": anime.get("affiche") or anime.get("affiche_small"),
+                "score": score,
+            })
 
-        # Scoring rapidfuzz
-        scored = []
-        for r in results:
-            score = fuzz.token_set_ratio(query.lower(), r["title"].lower())
-            # Bonus spécificité
-            if abs(len(query) - len(r["title"])) < 5:
-                score += 10
-            if score >= 50:
-                scored.append({**r, "score": score})
-
-        scored.sort(key=lambda x: x["score"], reverse=True)
-        return scored[:limit]
+        results.sort(key=lambda x: x["score"], reverse=True)
+        return results[:limit]
 
     # ────────────────────────────────
-    # 3. Fiche anime (saisons, langues, épisodes)
+    # 3. Fiche anime (saisons, langues, épisodes) — catalogue local
     # ────────────────────────────────
     def get_anime_info(self, url_or_slug: str) -> Dict:
         """
-        Scrape une fiche anime FRAnime.
-        Retourne: titre, poster, genres, status, format, diffusion, synopsis,
-                  langues_disponibles, saisons_disponibles, episodes_par_saison, anime_id, slug
+        Retourne la fiche anime à partir du catalogue local. Accepte soit
+        une URL complète (avec anime_id, et éventuellement s=/lang= en
+        query string, comme construite par les callbacks Telegram), soit
+        un slug seul (moins fiable, cherche par correspondance de slug).
         """
-        if not url_or_slug.startswith("http"):
-            url = f"{self.base}/anime/{url_or_slug}"
-        else:
-            url = url_or_slug
+        anime_id = None
+        s_param = None
+        lang_param = None
+        slug = url_or_slug
 
-        html = self._fetch(url)
-        return self._parse_anime_page(html, url)
+        if url_or_slug.startswith("http"):
+            parsed = urlparse(url_or_slug)
+            qs = parse_qs(parsed.query)
+            anime_id = (qs.get("anime_id") or [None])[0]
+            s_param = (qs.get("s") or [None])[0]
+            lang_param = (qs.get("lang") or [None])[0]
+            slug = parsed.path.split("/anime/")[-1].strip("/").split("?")[0]
 
-    def _parse_anime_page(self, html: str, source_url: str) -> Dict:
-        soup = BeautifulSoup(html, "html.parser")
-        qs = parse_qs(urlparse(source_url).query)
-        anime_id = (qs.get("anime_id") or [None])[0]
-        slug = urlparse(source_url).path.split("/anime/")[-1].strip("/").split("?")[0]
+        anime = None
+        if anime_id:
+            anime = get_anime_by_id(anime_id)
+        if anime is None:
+            # Fallback : recherche par slug si l'anime_id est absent/invalide
+            for candidate in fetch_catalog():
+                if slugify(candidate.get("title", "")) == slug:
+                    anime = candidate
+                    break
 
         sheet = {
-            "anime_id": anime_id,
+            "anime_id": str(anime.get("id")) if anime else anime_id,
             "slug": slug,
             "titre": None,
             "poster": None,
@@ -389,130 +300,53 @@ class FranimeScraper:
             "episodes_par_saison": {},
         }
 
-        leaves = self._leaves(soup)
-
-        # Titre (h1)
-        h1 = soup.find("h1")
-        if h1:
-            sheet["titre"] = h1.get_text(strip=True)
-        idx_title = self._find_leaf(leaves, r"^" + re.escape(sheet["titre"] or "\x00") + r"$") if sheet["titre"] else None
-
-        # Poster : premier <img> qui n'est ni logo ni bannière
-        for img in soup.find_all("img"):
-            src = img.get("src", "")
-            if any(k in src.lower() for k in ["logo", "banner", "franime_landing"]):
-                continue
-            if src:
-                sheet["poster"] = src
-                break
-
-        # Compteurs saisons / épisodes
-        idx_saisons_count = self._find_leaf(leaves, r"^\d+\s*saisons?$")
-        idx_episodes_count = self._find_leaf(leaves, r"^\d+\s*épisodes?$")
-        if idx_saisons_count is not None:
-            m = re.match(r"^(\d+)", leaves[idx_saisons_count].get_text(strip=True))
-            if m:
-                sheet["nb_saisons"] = m.group(1)
-        if idx_episodes_count is not None:
-            m = re.match(r"^(\d+)", leaves[idx_episodes_count].get_text(strip=True))
-            if m:
-                sheet["nb_episodes"] = m.group(1)
-
-        # Statut / Format / Diffusion
-        idx_status = self._find_leaf(leaves, r"^Status\s*:")
-        if idx_status is not None:
-            end_status = idx_title if idx_title is not None else idx_status + 6
-            status_join = " ".join(self._texts_between(leaves, idx_status - 1, end_status) or [leaves[idx_status].get_text(strip=True)])
-            m_status = re.search(r"Status\s*:\s*(.+?)\s*Format\s*:", status_join)
-            m_format = re.search(r"Format\s*:\s*(\S+)\s*Diffusion\s*:", status_join)
-            m_diff = re.search(r"Diffusion\s*:\s*(.+)$", status_join)
-            sheet["status"] = m_status.group(1).strip() if m_status else None
-            sheet["format"] = m_format.group(1).strip() if m_format else None
-            sheet["diffusion"] = m_diff.group(1).strip() if m_diff else None
-
-        # Genres
-        if idx_episodes_count is not None and idx_status is not None:
-            genres = self._texts_between(leaves, idx_episodes_count, idx_status)
-            sheet["genres"] = [g for g in genres if g and not re.match(r"^[\d.,]+$", g)]
-
-        # Synopsis
-        idx_trailer = self._find_leaf(leaves, r"^Voir la bande annonce$")
-        if idx_title is not None:
-            desc_parts = self._texts_between(leaves, idx_title, idx_trailer)
-            sheet["synopsis"] = " ".join(desc_parts).strip() or None
-
-        # Langues disponibles
-        idx_langue_h = self._find_leaf(leaves, r"^Langue$")
-        idx_saison_h = self._find_leaf(leaves, r"^Saison$")
-        if idx_langue_h is not None:
-            sheet["langues_disponibles"] = [
-                t for t in self._texts_between(leaves, idx_langue_h, idx_saison_h)
-                if t in ("VOSTFR", "VF", "VA", "VJ")
-            ]
-
-        # Saisons disponibles
-        idx_episodes_h = self._find_leaf(leaves, r"^Épisodes$")
-        if idx_saison_h is not None:
-            sheet["saisons_disponibles"] = [
-                t for t in self._texts_between(leaves, idx_saison_h, idx_episodes_h)
-                if re.match(r"^Saison\s+[\d.]+$", t)
-            ]
-
-        # Épisodes de la saison courante
-        idx_footer = self._find_leaf(leaves, r"aucun fichier vidéo", re.IGNORECASE)
-        ep_tokens = self._texts_between(leaves, idx_episodes_h, idx_footer)
-
-        episodes = []
-        current_lang = None
-        for tok in ep_tokens:
-            if tok in ("Flouter", "Charger les informations des épisodes"):
-                continue
-            if tok in ("VOSTFR", "VF", "VA", "VJ"):
-                current_lang = tok
-                continue
-            m_ep = re.match(r"^[EÉ]pisode\s+(\d+)$", tok)
-            if m_ep:
-                episodes.append({"numero": m_ep.group(1), "langue": current_lang})
-                current_lang = None
-                continue
-            m_ago = re.match(r"^Il y a .+$", tok)
-            if m_ago and episodes:
-                episodes[-1]["publie_il_y_a"] = tok
-
-        season_label = None
-        s_param = (qs.get("s") or [None])[0]
-        if s_param:
-            season_label = f"Saison {s_param}"
-        sheet["episodes_par_saison"][season_label or "inconnue"] = episodes
-
-        return sheet
-
-    def get_all_seasons(self, slug: str, anime_id: str, delay: float = 1.0) -> Dict:
-        """
-        Scrape toutes les saisons d'un anime en partant de la saison 1.
-        Retourne la fiche complète avec tous les épisodes par saison.
-        """
-        url = f"{self.base}/anime/{slug}?s=1&ep=&lang=vo&anime_id={anime_id}"
-        html = self._fetch(url)
-        sheet = self._parse_anime_page(html, url)
-
-        if not sheet["saisons_disponibles"] or not anime_id:
+        if anime is None:
+            logger.warning("get_anime_info: anime introuvable dans le catalogue (id=%s, slug=%s)", anime_id, slug)
             return sheet
 
-        for season_label in sheet["saisons_disponibles"]:
-            s_value = season_label.replace("Saison", "").strip()
-            key = f"Saison {s_value}"
-            if key in sheet["episodes_par_saison"] and sheet["episodes_par_saison"][key]:
-                continue
-            season_url = f"{self.base}/anime/{slug}?s={s_value}&ep=&lang=vo&anime_id={anime_id}"
-            time.sleep(delay)
-            try:
-                season_html = self._fetch(season_url)
-                season_sheet = self._parse_anime_page(season_html, season_url)
-                for label, eps in season_sheet["episodes_par_saison"].items():
-                    sheet["episodes_par_saison"][label] = eps
-            except Exception:
-                continue
+        saisons = anime.get("saisons") or []
+
+        sheet["titre"] = anime.get("title") or anime.get("titleO")
+        sheet["poster"] = anime.get("affiche") or anime.get("affiche_small")
+        sheet["note"] = anime.get("note")
+        sheet["genres"] = anime.get("themes") or []
+        sheet["nb_saisons"] = str(len(saisons))
+        sheet["nb_episodes"] = str(sum(len(s.get("episodes") or []) for s in saisons))
+        sheet["status"] = anime.get("status")
+        sheet["format"] = anime.get("format")
+        sheet["diffusion"] = f"{anime.get('startDate') or '?'} / {anime.get('endDate') or '?'}"
+        sheet["synopsis"] = anime.get("description")
+        sheet["saisons_disponibles"] = [s.get("title") for s in saisons if s.get("title")]
+
+        # Saison ciblée par la requête (s=...), sinon la première disponible
+        target_season = None
+        if s_param:
+            target_season = next((s for s in saisons if s.get("title") == f"Saison {s_param}"), None)
+        elif saisons:
+            target_season = saisons[0]
+
+        if target_season:
+            episodes = target_season.get("episodes") or []
+
+            # Langues réellement disponibles sur cette saison
+            catalog_langs = set()
+            for ep in episodes:
+                catalog_langs.update((ep.get("lang") or {}).keys())
+            sheet["langues_disponibles"] = [
+                LANG_CATALOG_TO_LABEL[c] for c in ("vo", "vf") if c in catalog_langs
+            ]
+
+            # Épisodes disponibles dans la langue demandée (lang=...)
+            if lang_param:
+                catalog_lang = LANG_LABEL_TO_CATALOG.get(lang_param.lower(), lang_param.lower())
+                numeros = []
+                for i, ep in enumerate(episodes, start=1):
+                    if catalog_lang in (ep.get("lang") or {}):
+                        m = re.search(r"(\d+)", ep.get("title") or "")
+                        numeros.append({"numero": m.group(1) if m else str(i)})
+                if s_param:
+                    sheet["episodes_par_saison"][f"Saison {s_param}"] = numeros
+
         return sheet
 
     # ────────────────────────────────
@@ -530,7 +364,6 @@ class FranimeScraper:
         links = []
         seen = set()
 
-        # 1. Chercher les iframes
         for iframe in soup.find_all("iframe"):
             src = iframe.get("src")
             if src and src not in seen:
@@ -538,7 +371,6 @@ class FranimeScraper:
                 host = self._detect_host(src)
                 links.append({"host": host, "url": src})
 
-        # 2. Chercher les balises <video>
         for video in soup.find_all("video"):
             src = video.get("src")
             if src and src not in seen:
@@ -550,10 +382,8 @@ class FranimeScraper:
                     seen.add(src)
                     links.append({"host": "direct", "url": src})
 
-        # 3. Chercher dans les scripts JS des URLs .mp4 / .m3u8 / lecteurs connus
         for script in soup.find_all("script"):
             text = script.string or ""
-            # Patterns classiques
             for pattern in [
                 r'https?://[^\s"\'<>]+\.mp4',
                 r'https?://[^\s"\'<>]+\.m3u8',
@@ -570,7 +400,6 @@ class FranimeScraper:
                         host = self._detect_host(match)
                         links.append({"host": host, "url": match})
 
-        # 4. Chercher des <a> avec texte contenant le nom d'un hôte
         host_names = ["sibnet", "vidmoly", "sendvid", "doodstream", "voe", "streamtape", "yourupload", "mega", "mp4upload"]
         for a in soup.find_all("a", href=True):
             href = a["href"]
@@ -614,22 +443,16 @@ class FranimeScraper:
     # 5. Résolution directe (MP4) pour certains hôtes
     # ────────────────────────────────
     def resolve_direct_link(self, link: Dict) -> Optional[str]:
-        """
-        Tente de résoudre un lien iframe en lien direct MP4/M3U8.
-        À surcharger / étendre selon les hôtes supportés.
-        """
         host = link["host"]
         url = link["url"]
 
         if host in ("direct_mp4", "direct_m3u8"):
             return url
 
-        # Sibnet : l'iframe contient souvent un player avec le mp4 dans une balise <source>
         if host == "sibnet":
             try:
                 html = self._fetch(url)
                 soup = BeautifulSoup(html, "html.parser")
-                # Chercher <source src="..."> ou <video src="...">
                 for source in soup.find_all("source"):
                     src = source.get("src")
                     if src and ".mp4" in src:
@@ -637,7 +460,6 @@ class FranimeScraper:
                 video = soup.find("video")
                 if video and video.get("src"):
                     return video["src"]
-                # Chercher dans le JS
                 for script in soup.find_all("script"):
                     text = script.string or ""
                     m = re.search(r'["\'](https?://[^"\']+\.mp4)["\']', text)
@@ -646,7 +468,6 @@ class FranimeScraper:
             except Exception:
                 pass
 
-        # Vidmoly : souvent un iframe qui redirige vers une page player
         if host == "vidmoly":
             try:
                 html = self._fetch(url)
@@ -662,7 +483,6 @@ class FranimeScraper:
             except Exception:
                 pass
 
-        # Sendvid : l'URL directe est parfois l'URL de la page + .mp4 ou dans le HTML
         if host == "sendvid":
             try:
                 html = self._fetch(url)

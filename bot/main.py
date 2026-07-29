@@ -93,6 +93,19 @@ async def main():
 
     await app.start()
     print("[Bot] Bot démarré")
+
+    # Scan immédiat au démarrage : si le bot redémarre en cours de journée
+    # (redeploy, crash, etc.), on ne veut pas attendre minuit pour recharger
+    # les sorties du jour dans queue.json. Sans ça, un redémarrage à 14h
+    # ferait perdre toutes les hebdo du jour restantes.
+    # check_posters/check_releases tournant déjà toutes les 1-2 min, tout
+    # créneau déjà passé au moment du scan sera rattrapé au prochain cycle.
+    try:
+        print("[Bot] Scan immédiat du calendrier du jour (rattrapage post-redémarrage)...")
+        await scan_calendar(franime, tmdb)
+    except Exception as e:
+        print(f"[Bot] Échec du scan immédiat au démarrage: {e}")
+
     await idle()
 
     await app.stop()

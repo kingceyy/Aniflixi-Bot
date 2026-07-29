@@ -26,6 +26,12 @@ app = Client(
     bot_token=Config.BOT_TOKEN,
     workers=4,
     plugins=dict(root="bot/handlers"),
+    # ipv6=False : sur la plupart des hébergeurs cloud (Koyeb inclus),
+    # l'IPv6 sortant est souvent mal routé/bloqué. Pyrogram tente quand
+    # même les DC Telegram en IPv6 par défaut, ce qui se traduit par des
+    # timeouts en boucle sur upload.GetFile lors des téléchargements de
+    # fichiers (ex: /importcatalog). Forcer l'IPv4 corrige ça.
+    ipv6=False,
 )
 
 
@@ -96,10 +102,7 @@ async def main():
 
     # Scan immédiat au démarrage : si le bot redémarre en cours de journée
     # (redeploy, crash, etc.), on ne veut pas attendre minuit pour recharger
-    # les sorties du jour dans queue.json. Sans ça, un redémarrage à 14h
-    # ferait perdre toutes les hebdo du jour restantes.
-    # check_posters/check_releases tournant déjà toutes les 1-2 min, tout
-    # créneau déjà passé au moment du scan sera rattrapé au prochain cycle.
+    # les sorties du jour dans queue.json.
     try:
         print("[Bot] Scan immédiat du calendrier du jour (rattrapage post-redémarrage)...")
         await scan_calendar(franime, tmdb)

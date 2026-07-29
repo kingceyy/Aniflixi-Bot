@@ -6,8 +6,15 @@ Principe (identique à AnimeSamaApi de TMCooper) :
   https://api.franime.fr/api/animes (2488 animes, JSON pur).
 - On le met en cache sur disque (TTL 24h).
 - La recherche se fait ENSUITE en local avec rapidfuzz : aucune requête
-  réseau supplémentaire par recherche, aucune dépendance à ZenRows ou
-  au rendu JS de /recherche.
+  réseau supplémentaire par recherche, aucune dépendance au rendu JS
+  de /recherche.
+
+Note IP datacenter vs IP résidentielle :
+Cloudflare bloque (403) plus agressivement les IP de serveurs cloud
+(Koyeb, AWS, etc.) que les IP mobiles/résidentielles, même quand
+cloudscraper résout correctement le challenge JS. Si l'appel direct
+échoue, on retente via ZenRows (proxy premium) comme le fait déjà
+franime.py pour le reste du site.
 """
 import os
 import json
@@ -16,6 +23,7 @@ import re
 import unicodedata
 from typing import Optional
 
+import requests
 import cloudscraper
 from rapidfuzz import process, fuzz
 
@@ -23,29 +31,65 @@ from bot.config import Config
 
 CATALOG_PATH = os.path.join(Config.DATA_DIR, "animes_catalog.json")
 CATALOG_TTL = 24 * 3600  # 24h
+CATALOG_URL = "https://api.franime.fr/api/animes"
 
-# Mapping entre les codes langue du catalogue ("vo"/"vf") et les labels
-# affichés dans les claviers Telegram existants ("VOSTFR"/"VF").
 LANG_CATALOG_TO_LABEL = {"vo": "VOSTFR", "vf": "VF"}
 LANG_LABEL_TO_CATALOG = {"vostfr": "vo", "vf": "vf"}
 
 _catalog_cache: Optional[list] = None
 _catalog_cache_ts: float = 0
+_scraper = cloudscraper.create_scraper(
+    browser={"browser": "chrome", "platform": "windows", "mobile": False}
+)
 
 
 def slugify(title: str) -> str:
     """
     Reproduit (approximativement) la génération de slug de franime.fr.
     Vérifié fonctionnel en pratique : franime.fr résout les pages via
-    anime_id, pas via le slug — un slug imparfait (accents, orthographe
-    Kitsu différente comme "shippuuden" vs "shippuden") n'empêche donc
-    PAS la page de s'afficher correctement.
+    anime_id, pas via le slug — un slug imparfait n'empêche donc PAS
+    la page de s'afficher correctement.
     """
     title = unicodedata.normalize("NFKD", title).encode("ascii", "ignore").decode()
     title = title.lower()
     title = re.sub(r"[':!,.]", "", title)
     title = re.sub(r"[^a-z0-9]+", "-", title)
     return title.strip("-")
+
+
+def _download_catalog() -> list:
+    """Tente un accès direct (cloudscraper), puis bascule sur ZenRows
+    si Cloudflare renvoie 403 (cas typique d'une IP de datacenter)."""
+    try:
+        resp = _scraper.get(
+            CATALOG_URL,
+            headers={"Referer": "https://franime.fr/", "Accept": "application/json"},
+            timeout=30,
+        )
+        resp.raise_for_status()
+        return resp.json()
+    except requests.exceptions.HTTPError as e:
+        status = e.response.status_code if e.response is not None else None
+        if status != 403:
+            raise
+        # Fallback ZenRows (pas de js_render nécessaire ici, c'est du JSON pur ;
+        # premium_proxy suffit à changer l'origine de la requête)
+        if not Config.ZENROWS_API_KEY:
+            raise RuntimeError(
+                "api.franime.fr a renvoyé 403 (IP probablement bloquée par Cloudflare) "
+                "et ZENROWS_API_KEY n'est pas configuré pour le fallback."
+            ) from e
+        zr_resp = requests.get(
+            "https://api.zenrows.com/v1/",
+            params={
+                "url": CATALOG_URL,
+                "apikey": Config.ZENROWS_API_KEY,
+                "premium_proxy": "true",
+            },
+            timeout=45,
+        )
+        zr_resp.raise_for_status()
+        return zr_resp.json()
 
 
 def fetch_catalog(force: bool = False) -> list:
@@ -66,16 +110,7 @@ def fetch_catalog(force: bool = False) -> list:
             return data
 
     os.makedirs(Config.DATA_DIR, exist_ok=True)
-    scraper = cloudscraper.create_scraper(
-        browser={"browser": "chrome", "platform": "windows", "mobile": False}
-    )
-    resp = scraper.get(
-        "https://api.franime.fr/api/animes",
-        headers={"Referer": "https://franime.fr/", "Accept": "application/json"},
-        timeout=30,
-    )
-    resp.raise_for_status()
-    data = resp.json()
+    data = _download_catalog()
 
     with open(CATALOG_PATH, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False)

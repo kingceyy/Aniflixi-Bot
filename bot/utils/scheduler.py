@@ -53,18 +53,15 @@ def _today_str() -> str:
 
 async def scan_calendar(franime: FranimeScraper, tmdb: TMDBClient):
     """
-    Appelé à 00:00.
+    Appelé à 00:00 (et une fois au démarrage du bot, voir main.py).
     Scrape le calendrier FRAnime, extrait les sorties du jour,
     enrichit avec TMDB, et stocke dans queue.json.
     """
     queue = load_queue()
-    # On garde seulement les items d'aujourd'hui qui ne sont pas encore publiés
-    # ou on les reset pour le nouveau jour
     queue["schedule"] = []
 
     planning = franime.get_calendar()
     today_fr = datetime.now(TZ).strftime("%A").lower()
-    # mapping anglais -> français si nécessaire, mais get_calendar retourne déjà en français
     day_map = {
         "monday": "lundi", "tuesday": "mardi", "wednesday": "mercredi",
         "thursday": "jeudi", "friday": "vendredi", "saturday": "samedi", "sunday": "dimanche"
@@ -76,7 +73,6 @@ async def scan_calendar(franime: FranimeScraper, tmdb: TMDBClient):
         heure = rel.get("heure")
         if not heure:
             continue
-        # Enrichir avec TMDB poster
         poster = await tmdb.get_poster_url(rel.get("titre", ""))
         queue["schedule"].append({
             "titre": rel.get("titre"),
@@ -103,7 +99,6 @@ async def check_posters(client, tmdb: TMDBClient):
     """
     queue = load_queue()
     now = datetime.now(TZ)
-    now_time = now.time()
 
     updated = False
     for item in queue.get("schedule", []):
@@ -112,7 +107,10 @@ async def check_posters(client, tmdb: TMDBClient):
         rel_time = _parse_time(item.get("heure", ""))
         if not rel_time:
             continue
-        rel_dt = datetime.combine(now.date(), rel_time)
+        # tzinfo=TZ obligatoire : `now` est aware (via datetime.now(TZ)),
+        # sans ça datetime.combine() produit un datetime naive et la
+        # comparaison `now >= poster_time` lève un TypeError.
+        rel_dt = datetime.combine(now.date(), rel_time, tzinfo=TZ)
         poster_time = rel_dt - timedelta(minutes=2)
 
         if now >= poster_time:
@@ -155,7 +153,6 @@ async def check_releases(client, franime: FranimeScraper):
     """
     queue = load_queue()
     now = datetime.now(TZ)
-    now_time = now.time()
 
     updated = False
     for item in queue.get("schedule", []):
@@ -164,7 +161,8 @@ async def check_releases(client, franime: FranimeScraper):
         rel_time = _parse_time(item.get("heure", ""))
         if not rel_time:
             continue
-        rel_dt = datetime.combine(now.date(), rel_time)
+        # Même correctif que dans check_posters : tzinfo=TZ requis.
+        rel_dt = datetime.combine(now.date(), rel_time, tzinfo=TZ)
 
         if now >= rel_dt:
             slug = item.get("slug")
@@ -179,7 +177,6 @@ async def check_releases(client, franime: FranimeScraper):
                 continue
 
             try:
-                # 1. Récupération des liens
                 links = franime.get_episode_links(slug, anime_id, str(saison), str(episode), lang)
                 direct_url = None
                 for link in links:
@@ -192,7 +189,6 @@ async def check_releases(client, franime: FranimeScraper):
                     print(f"[Scheduler] Aucun lien direct trouvé pour {titre} ep{episode}")
                     continue
 
-                # 2. Téléchargement
                 hd_path = os.path.join(Config.DOWNLOAD_DIR, f"{slug}_s{saison}e{episode}_hd.mp4")
                 low_path = os.path.join(Config.DOWNLOAD_DIR, f"{slug}_s{saison}e{episode}_480p.mp4")
                 os.makedirs(Config.DOWNLOAD_DIR, exist_ok=True)
@@ -205,7 +201,6 @@ async def check_releases(client, franime: FranimeScraper):
 
                 await download_file(direct_url, hd_path)
 
-                # 3. Conversion 480p
                 await client.edit_message_text(
                     Config.CHANNEL_ID,
                     status_msg.id,
@@ -214,7 +209,6 @@ async def check_releases(client, franime: FranimeScraper):
                 )
                 await convert_to_480p(hd_path, low_path)
 
-                # 4. Upload 480p
                 await client.edit_message_text(
                     Config.CHANNEL_ID,
                     status_msg.id,
@@ -229,7 +223,6 @@ async def check_releases(client, franime: FranimeScraper):
                     supports_streaming=True
                 )
 
-                # 5. Upload HD
                 await client.edit_message_text(
                     Config.CHANNEL_ID,
                     status_msg.id,
@@ -244,7 +237,6 @@ async def check_releases(client, franime: FranimeScraper):
                     supports_streaming=True
                 )
 
-                # 6. Cleanup
                 await cleanup_files(hd_path, low_path)
                 await client.delete_messages(Config.CHANNEL_ID, status_msg.id)
 
